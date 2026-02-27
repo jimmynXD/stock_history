@@ -201,7 +201,7 @@ def main():
     filename = get_filename(date_str, output_dir)
     successful = 0
 
-    with open(filename, "w", encoding="utf-8") as f:
+    with open(filename, "w", encoding="big5") as f:
         for symbol, custom_header in symbols.items():
             data = fetch_data(symbol, start_date, end_date)
 
