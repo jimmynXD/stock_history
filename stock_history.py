@@ -148,7 +148,10 @@ def healthcheck():
 def main():
     """Main function to download and save stock OHLC history data."""
     if len(sys.argv) < 2:
-        print("Usage: stock_history.py <symbol|file> [start_date] [end_date] [output_dir]")
+        print("Usage: stock_history.py <symbol|file> [start_date] [end_date] [output_path]")
+        print("  output_path can be:")
+        print("    - Directory path (e.g., ./data)")
+        print("    - Full file path (e.g., ./data/my_stocks.txt)")
         sys.exit(1)
 
     # Healthcheck
@@ -166,7 +169,7 @@ def main():
 
     start_date = sys.argv[2] if len(sys.argv) > 2 else None
     end_date = sys.argv[3] if len(sys.argv) > 3 else None
-    output_dir = sys.argv[4] if len(sys.argv) > 4 else "."
+    output_path = sys.argv[4] if len(sys.argv) > 4 else None
 
     # Validate date range before making API calls
     if start_date and end_date:
@@ -198,7 +201,21 @@ def main():
     else:
         date_str = datetime.now().strftime("%Y-%m-%d")
 
-    filename = get_filename(date_str, output_dir)
+    # Determine filename based on output_path
+    if output_path:
+        if output_path.endswith('.txt'):
+            # Full file path provided
+            filename = output_path
+            output_dir = os.path.dirname(output_path) or "."
+            if output_dir != ".":
+                os.makedirs(output_dir, exist_ok=True)
+        else:
+            # Directory path provided
+            filename = get_filename(date_str, output_path)
+    else:
+        # No output path, use current directory
+        filename = get_filename(date_str, ".")
+    
     successful = 0
 
     with open(filename, "w", encoding="big5") as f:
