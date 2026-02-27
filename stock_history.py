@@ -58,8 +58,8 @@ def read_symbols(input_arg):
                         # Plain text format (symbols.txt)
                         symbols_dict[line] = None
         except UnicodeDecodeError:
-            # Fallback to ANSI encoding for Windows files
-            with open(input_arg, "r", encoding="cp1252") as f:
+            # Fallback to Big5 encoding for Traditional Chinese Windows files
+            with open(input_arg, "r", encoding="big5") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
