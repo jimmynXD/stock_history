@@ -203,7 +203,7 @@ def main():
 
     # Determine filename based on output_path
     if output_path:
-        if output_path.endswith('.txt'):
+        if output_path.lower().endswith('.txt'):
             # Full file path provided
             filename = output_path
             output_dir = os.path.dirname(output_path) or "."
