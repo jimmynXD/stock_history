@@ -5,29 +5,87 @@ from datetime import datetime, timedelta
 import yfinance as yf
 
 
+# Suppress yfinance verbose error messages
+class SuppressStderr:
+    """Context manager to suppress stderr output."""
+    def __enter__(self):
+        self._original_stderr = sys.stderr
+        sys.stderr = open(os.devnull, 'w')
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stderr.close()
+        sys.stderr = self._original_stderr
+
+
 def read_symbols(input_arg):
     """Read stock symbols from file or return single symbol."""
     if os.path.isfile(input_arg):
         symbols_dict = {}
-        with open(input_arg, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                # Check if line contains quoted values (StockList.txt format)
-                if line.startswith('"'):
-                    parts = line.split('","')
-                    if len(parts) >= 2:
-                        symbol = parts[0].strip('"')
-                        header = parts[1].strip('"')
-                        symbols_dict[symbol] = header
+        # Try UTF-8 first, fallback to ANSI (cp1252) for Windows files
+        try:
+            with open(input_arg, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Check if line contains quoted values (StockList.txt format)
+                    if line.startswith('"'):
+                        # Find first closing quote
+                        first_quote_end = line.find('"', 1)
+                        if first_quote_end > 0:
+                            symbol = line[1:first_quote_end]
+                            # Look for second quoted section after comma
+                            comma_pos = line.find(',', first_quote_end)
+                            if comma_pos > 0:
+                                second_quote_start = line.find('"', comma_pos)
+                                if second_quote_start > 0:
+                                    second_quote_end = line.find('"', second_quote_start + 1)
+                                    if second_quote_end > 0:
+                                        header = line[second_quote_start + 1:second_quote_end]
+                                        symbols_dict[symbol] = header
+                                    else:
+                                        symbols_dict[symbol] = None
+                                else:
+                                    symbols_dict[symbol] = None
+                            else:
+                                # Single quoted symbol
+                                symbols_dict[symbol] = None
+                        else:
+                            # Malformed line, skip
+                            continue
                     else:
-                        # Single quoted symbol
-                        symbol = line.strip('"')
-                        symbols_dict[symbol] = None
-                else:
-                    # Plain text format (symbols.txt)
-                    symbols_dict[line] = None
+                        # Plain text format (symbols.txt)
+                        symbols_dict[line] = None
+        except UnicodeDecodeError:
+            # Fallback to ANSI encoding for Windows files
+            with open(input_arg, "r", encoding="cp1252") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.startswith('"'):
+                        first_quote_end = line.find('"', 1)
+                        if first_quote_end > 0:
+                            symbol = line[1:first_quote_end]
+                            comma_pos = line.find(',', first_quote_end)
+                            if comma_pos > 0:
+                                second_quote_start = line.find('"', comma_pos)
+                                if second_quote_start > 0:
+                                    second_quote_end = line.find('"', second_quote_start + 1)
+                                    if second_quote_end > 0:
+                                        header = line[second_quote_start + 1:second_quote_end]
+                                        symbols_dict[symbol] = header
+                                    else:
+                                        symbols_dict[symbol] = None
+                                else:
+                                    symbols_dict[symbol] = None
+                            else:
+                                symbols_dict[symbol] = None
+                        else:
+                            continue
+                    else:
+                        symbols_dict[line] = None
         return symbols_dict
     # Single symbol from command line
     return {input_arg: None}
@@ -36,21 +94,27 @@ def read_symbols(input_arg):
 def fetch_data(symbol, start_date, end_date):
     """Fetch OHLC data for a stock symbol using yfinance."""
     try:
-        ticker = yf.Ticker(symbol)
-        if start_date and end_date:
-            # Add one day to end_date since yfinance end parameter is exclusive
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-            end_dt_inclusive = end_dt + timedelta(days=1)
-            end_date_str = end_dt_inclusive.strftime("%Y-%m-%d")
-            data = ticker.history(start=start_date, end=end_date_str)
-        elif start_date:
-            data = ticker.history(start=start_date, period="1d")
-        else:
-            data = ticker.history(period="1d")
+        with SuppressStderr():
+            ticker = yf.Ticker(symbol)
+            if start_date and end_date:
+                # Add one day to end_date since yfinance end parameter is exclusive
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                end_dt_inclusive = end_dt + timedelta(days=1)
+                end_date_str = end_dt_inclusive.strftime("%Y-%m-%d")
+                data = ticker.history(start=start_date, end=end_date_str)
+            elif start_date:
+                data = ticker.history(start=start_date, period="1d")
+            else:
+                data = ticker.history(period="1d")
 
-        if data.empty:
-            return None
-        return data
+            if data.empty:
+                # Check if symbol exists by trying to get recent data
+                recent_data = ticker.history(period="5d")
+                if recent_data.empty:
+                    return None  # Symbol not found
+                else:
+                    return "NO_DATA_FOR_DATE"  # Symbol exists but no data for requested date
+            return data
     except (KeyError, ValueError, ConnectionError):
         return None
 
@@ -61,7 +125,7 @@ def healthcheck():
         # Quick check using a well-known symbol with minimal data
         ticker = yf.Ticker("AAPL")
         info = ticker.fast_info
-        return info is not None and hasattr(info, 'last_price')
+        return info is not None and hasattr(info, "last_price")
     except Exception:
         return False
 
@@ -99,7 +163,7 @@ def main():
         except ValueError:
             print("Error: Invalid date format. Use YYYY-MM-DD")
             sys.exit(1)
-    
+
     # Check if single date is a weekend
     if start_date and not end_date:
         try:
@@ -126,20 +190,39 @@ def main():
         if data is None:
             print(f"{symbol} not found")
             continue
+        
+        if isinstance(data, str) and data == "NO_DATA_FOR_DATE":
+            if start_date and end_date:
+                print(f"{symbol} no data available for {start_date} to {end_date}")
+            elif start_date:
+                print(f"{symbol} no data available for {start_date}")
+            else:
+                print(f"{symbol} no recent data available")
+            continue
 
         if len(data) == 1:
             row = data.iloc[0]
             date_fmt = data.index[0].strftime("%Y-%m-%d")
-            print(f"{date_fmt},{symbol},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}")
+            # Check if Open/Close is outside High/Low range
+            flag = "; " if (row['Open'] > row['High'] or row['Open'] < row['Low'] or 
+                          row['Close'] > row['High'] or row['Close'] < row['Low']) else ""
+            print(
+                f"{flag}{date_fmt},{symbol},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}"
+            )
         else:
             # Use custom header if available, otherwise use default
             if custom_header:
                 print(custom_header)
             else:
                 print(f"DATE OHLCV {symbol}")
-            for date, row in data[::-1].iterrows():
+            for date, row in data.iterrows():
                 date_fmt = date.strftime("%Y-%m-%d")
-                print(f"{date_fmt},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}")
+                # Check if Open/Close is outside High/Low range
+                flag = "; " if (row['Open'] > row['High'] or row['Open'] < row['Low'] or 
+                              row['Close'] > row['High'] or row['Close'] < row['Low']) else ""
+                print(
+                    f"{flag}{date_fmt},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}"
+                )
             print()  # Empty line between symbols
 
         successful += 1
