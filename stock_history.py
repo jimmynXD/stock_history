@@ -8,11 +8,12 @@ import yfinance as yf
 # Suppress yfinance verbose error messages
 class SuppressStderr:
     """Context manager to suppress stderr output."""
+
     def __enter__(self):
         self._original_stderr = sys.stderr
-        sys.stderr = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, "w")
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         sys.stderr.close()
         sys.stderr = self._original_stderr
@@ -22,7 +23,7 @@ def read_symbols(input_arg):
     """Read stock symbols from file or return single symbol."""
     if os.path.isfile(input_arg):
         symbols_dict = {}
-        # Try UTF-8 first, fallback to ANSI (cp1252) for Windows files
+        # Try UTF-8 first, fallback to Big5 encoding for Traditional Chinese Windows files
         try:
             with open(input_arg, "r", encoding="utf-8") as f:
                 for line in f:
@@ -36,13 +37,17 @@ def read_symbols(input_arg):
                         if first_quote_end > 0:
                             symbol = line[1:first_quote_end]
                             # Look for second quoted section after comma
-                            comma_pos = line.find(',', first_quote_end)
+                            comma_pos = line.find(",", first_quote_end)
                             if comma_pos > 0:
                                 second_quote_start = line.find('"', comma_pos)
                                 if second_quote_start > 0:
-                                    second_quote_end = line.find('"', second_quote_start + 1)
+                                    second_quote_end = line.find(
+                                        '"', second_quote_start + 1
+                                    )
                                     if second_quote_end > 0:
-                                        header = line[second_quote_start + 1:second_quote_end]
+                                        header = line[
+                                            second_quote_start + 1 : second_quote_end
+                                        ]
                                         symbols_dict[symbol] = header
                                     else:
                                         symbols_dict[symbol] = None
@@ -68,13 +73,17 @@ def read_symbols(input_arg):
                         first_quote_end = line.find('"', 1)
                         if first_quote_end > 0:
                             symbol = line[1:first_quote_end]
-                            comma_pos = line.find(',', first_quote_end)
+                            comma_pos = line.find(",", first_quote_end)
                             if comma_pos > 0:
                                 second_quote_start = line.find('"', comma_pos)
                                 if second_quote_start > 0:
-                                    second_quote_end = line.find('"', second_quote_start + 1)
+                                    second_quote_end = line.find(
+                                        '"', second_quote_start + 1
+                                    )
                                     if second_quote_end > 0:
-                                        header = line[second_quote_start + 1:second_quote_end]
+                                        header = line[
+                                            second_quote_start + 1 : second_quote_end
+                                        ]
                                         symbols_dict[symbol] = header
                                     else:
                                         symbols_dict[symbol] = None
@@ -96,13 +105,28 @@ def get_filename(date_str, output_dir="."):
     # Create output directory if it doesn't exist
     if output_dir != ".":
         os.makedirs(output_dir, exist_ok=True)
-    
-    base = os.path.join(output_dir, f"{date_str}-stock_history.txt")
-    if not os.path.exists(base):
-        return base
-    i = 1
-    while os.path.exists(os.path.join(output_dir, f"{date_str}-stock_history_{i}.txt")):
-        i += 1
+
+    # Check if date_str is in YYYYMMDD format (8 digits, no hyphens)
+    if len(date_str) == 8 and date_str.isdigit():
+        base = os.path.join(output_dir, f"{date_str}.txt")
+        if not os.path.exists(base):
+            return base
+        i = 1
+        while os.path.exists(os.path.join(output_dir, f"{date_str}_{i}.txt")):
+            i += 1
+        return os.path.join(output_dir, f"{date_str}_{i}.txt")
+    else:
+        # Original format with -stock_history suffix
+        base = os.path.join(output_dir, f"{date_str}-stock_history.txt")
+        if not os.path.exists(base):
+            return base
+        i = 1
+        while os.path.exists(os.path.join(output_dir, f"{date_str}-stock_history_{i}.txt")):
+            i += 1
+        return os.path.join(output_dir, f"{date_str}-stock_history_{i}.txt")
+
+
+def fetch_data(symbol, start_date, end_date):
     return os.path.join(output_dir, f"{date_str}-stock_history_{i}.txt")
 
 
@@ -140,7 +164,7 @@ def healthcheck():
         # Quick check using a well-known symbol with minimal data
         ticker = yf.Ticker("AAPL")
         info = ticker.fast_info
-        return info is not None and hasattr(info, 'last_price')
+        return info is not None and hasattr(info, "last_price")
     except Exception:
         return False
 
@@ -148,7 +172,9 @@ def healthcheck():
 def main():
     """Main function to download and save stock OHLC history data."""
     if len(sys.argv) < 2:
-        print("Usage: stock_history.py <symbol|file> [start_date] [end_date] [output_path]")
+        print(
+            "Usage: stock_history.py <symbol|file> [start_date] [end_date] [output_path]"
+        )
         print("  output_path can be:")
         print("    - Directory path (e.g., ./data)")
         print("    - Full file path (e.g., ./data/my_stocks.txt)")
@@ -182,7 +208,7 @@ def main():
         except ValueError:
             print("Error: Invalid date format. Use YYYY-MM-DD")
             sys.exit(1)
-    
+
     # Check if single date is a weekend
     if start_date and not end_date:
         try:
@@ -194,16 +220,53 @@ def main():
             print("Error: Invalid date format. Use YYYY-MM-DD")
             sys.exit(1)
 
+    successful = 0
+    stock_data = {}  # Store fetched data for date analysis
+
+    # First pass: fetch all data
+    for symbol, custom_header in symbols.items():
+        data = fetch_data(symbol, start_date, end_date)
+
+        if data is None:
+            print(f"{symbol} not found")
+            continue
+
+        if isinstance(data, str) and data == "NO_DATA_FOR_DATE":
+            if start_date and end_date:
+                print(f"{symbol} no data available for {start_date} to {end_date}")
+            elif start_date:
+                print(f"{symbol} no data available for {start_date}")
+            else:
+                print(f"{symbol} no recent data available")
+            continue
+        
+        stock_data[symbol] = (data, custom_header)
+    
+    # Find majority date for latest data queries (no start_date)
+    majority_date = None
+    if not start_date and stock_data:
+        date_counts = {}
+        for symbol, (data, _) in stock_data.items():
+            if len(data) == 1:
+                date_str = data.index[0].strftime("%Y-%m-%d")
+                date_counts[date_str] = date_counts.get(date_str, 0) + 1
+        if date_counts:
+            majority_date = max(date_counts, key=date_counts.get)
+    
+    # Determine date string for filename
     if start_date and end_date:
         date_str = f"{start_date}_to_{end_date}"
     elif start_date:
         date_str = start_date
+    elif majority_date:
+        # Use majority date without hyphens for latest data queries
+        date_str = majority_date.replace("-", "")
     else:
         date_str = datetime.now().strftime("%Y-%m-%d")
 
     # Determine filename based on output_path
     if output_path:
-        if output_path.lower().endswith('.txt'):
+        if output_path.lower().endswith(".txt"):
             # Full file path provided
             filename = output_path
             output_dir = os.path.dirname(output_path) or "."
@@ -216,31 +279,34 @@ def main():
         # No output path, use current directory
         filename = get_filename(date_str, ".")
     
-    successful = 0
-
+    # Second pass: write data with flags
     with open(filename, "w", encoding="big5") as f:
-        for symbol, custom_header in symbols.items():
-            data = fetch_data(symbol, start_date, end_date)
-
-            if data is None:
-                print(f"{symbol} not found")
-                continue
-            
-            if isinstance(data, str) and data == "NO_DATA_FOR_DATE":
-                if start_date and end_date:
-                    print(f"{symbol} no data available for {start_date} to {end_date}")
-                elif start_date:
-                    print(f"{symbol} no data available for {start_date}")
-                else:
-                    print(f"{symbol} no recent data available")
-                continue
+        for symbol, (data, custom_header) in stock_data.items():
 
             if len(data) == 1:
                 row = data.iloc[0]
                 date_fmt = data.index[0].strftime("%Y-%m-%d")
+                
+                # Check for date mismatch (only for latest data queries)
+                date_flag = majority_date and date_fmt != majority_date
+                
                 # Check if Open/Close is outside High/Low range
-                flag = "; " if (row['Open'] > row['High'] or row['Open'] < row['Low'] or 
-                              row['Close'] > row['High'] or row['Close'] < row['Low']) else ""
+                ohlc_flag = (
+                    row["Open"] > row["High"]
+                    or row["Open"] < row["Low"]
+                    or row["Close"] > row["High"]
+                    or row["Close"] < row["Low"]
+                )
+                
+                # Combine flags: date mismatch first, then OHLC anomaly
+                flag = ""
+                if date_flag and ohlc_flag:
+                    flag = "*; "
+                elif date_flag:
+                    flag = "* "
+                elif ohlc_flag:
+                    flag = "; "
+                
                 f.write(
                     f"{flag}{date_fmt},{symbol},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}\n"
                 )
@@ -253,8 +319,16 @@ def main():
                 for date, row in data.iterrows():
                     date_fmt = date.strftime("%Y-%m-%d")
                     # Check if Open/Close is outside High/Low range
-                    flag = "; " if (row['Open'] > row['High'] or row['Open'] < row['Low'] or 
-                                  row['Close'] > row['High'] or row['Close'] < row['Low']) else ""
+                    flag = (
+                        "; "
+                        if (
+                            row["Open"] > row["High"]
+                            or row["Open"] < row["Low"]
+                            or row["Close"] > row["High"]
+                            or row["Close"] < row["Low"]
+                        )
+                        else ""
+                    )
                     f.write(
                         f"{flag}{date_fmt},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}\n"
                     )

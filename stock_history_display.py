@@ -8,11 +8,12 @@ import yfinance as yf
 # Suppress yfinance verbose error messages
 class SuppressStderr:
     """Context manager to suppress stderr output."""
+
     def __enter__(self):
         self._original_stderr = sys.stderr
-        sys.stderr = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, "w")
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         sys.stderr.close()
         sys.stderr = self._original_stderr
@@ -22,7 +23,7 @@ def read_symbols(input_arg):
     """Read stock symbols from file or return single symbol."""
     if os.path.isfile(input_arg):
         symbols_dict = {}
-        # Try UTF-8 first, fallback to ANSI (cp1252) for Windows files
+        # Try UTF-8 first, fallback to Big5 encoding for Traditional Chinese Windows files
         try:
             with open(input_arg, "r", encoding="utf-8") as f:
                 for line in f:
@@ -36,13 +37,17 @@ def read_symbols(input_arg):
                         if first_quote_end > 0:
                             symbol = line[1:first_quote_end]
                             # Look for second quoted section after comma
-                            comma_pos = line.find(',', first_quote_end)
+                            comma_pos = line.find(",", first_quote_end)
                             if comma_pos > 0:
                                 second_quote_start = line.find('"', comma_pos)
                                 if second_quote_start > 0:
-                                    second_quote_end = line.find('"', second_quote_start + 1)
+                                    second_quote_end = line.find(
+                                        '"', second_quote_start + 1
+                                    )
                                     if second_quote_end > 0:
-                                        header = line[second_quote_start + 1:second_quote_end]
+                                        header = line[
+                                            second_quote_start + 1 : second_quote_end
+                                        ]
                                         symbols_dict[symbol] = header
                                     else:
                                         symbols_dict[symbol] = None
@@ -68,13 +73,17 @@ def read_symbols(input_arg):
                         first_quote_end = line.find('"', 1)
                         if first_quote_end > 0:
                             symbol = line[1:first_quote_end]
-                            comma_pos = line.find(',', first_quote_end)
+                            comma_pos = line.find(",", first_quote_end)
                             if comma_pos > 0:
                                 second_quote_start = line.find('"', comma_pos)
                                 if second_quote_start > 0:
-                                    second_quote_end = line.find('"', second_quote_start + 1)
+                                    second_quote_end = line.find(
+                                        '"', second_quote_start + 1
+                                    )
                                     if second_quote_end > 0:
-                                        header = line[second_quote_start + 1:second_quote_end]
+                                        header = line[
+                                            second_quote_start + 1 : second_quote_end
+                                        ]
                                         symbols_dict[symbol] = header
                                     else:
                                         symbols_dict[symbol] = None
@@ -183,14 +192,16 @@ def main():
         date_str = datetime.now().strftime("%Y-%m-%d")
 
     successful = 0
+    stock_data = {}  # Store fetched data for date analysis
 
+    # First pass: fetch all data
     for symbol, custom_header in symbols.items():
         data = fetch_data(symbol, start_date, end_date)
 
         if data is None:
             print(f"{symbol} not found")
             continue
-        
+
         if isinstance(data, str) and data == "NO_DATA_FOR_DATE":
             if start_date and end_date:
                 print(f"{symbol} no data available for {start_date} to {end_date}")
@@ -199,13 +210,47 @@ def main():
             else:
                 print(f"{symbol} no recent data available")
             continue
+        
+        stock_data[symbol] = (data, custom_header)
+    
+    # Find majority date for latest data queries (no start_date)
+    majority_date = None
+    if not start_date and stock_data:
+        date_counts = {}
+        for symbol, (data, _) in stock_data.items():
+            if len(data) == 1:
+                date_str = data.index[0].strftime("%Y-%m-%d")
+                date_counts[date_str] = date_counts.get(date_str, 0) + 1
+        if date_counts:
+            majority_date = max(date_counts, key=date_counts.get)
+    
+    # Second pass: display data with flags
+    for symbol, (data, custom_header) in stock_data.items():
 
         if len(data) == 1:
             row = data.iloc[0]
             date_fmt = data.index[0].strftime("%Y-%m-%d")
+            
+            # Check for date mismatch (only for latest data queries)
+            date_flag = majority_date and date_fmt != majority_date
+            
             # Check if Open/Close is outside High/Low range
-            flag = "; " if (row['Open'] > row['High'] or row['Open'] < row['Low'] or 
-                          row['Close'] > row['High'] or row['Close'] < row['Low']) else ""
+            ohlc_flag = (
+                row["Open"] > row["High"]
+                or row["Open"] < row["Low"]
+                or row["Close"] > row["High"]
+                or row["Close"] < row["Low"]
+            )
+            
+            # Combine flags: date mismatch first, then OHLC anomaly
+            flag = ""
+            if date_flag and ohlc_flag:
+                flag = "*; "
+            elif date_flag:
+                flag = "* "
+            elif ohlc_flag:
+                flag = "; "
+            
             print(
                 f"{flag}{date_fmt},{symbol},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}"
             )
@@ -218,8 +263,16 @@ def main():
             for date, row in data.iterrows():
                 date_fmt = date.strftime("%Y-%m-%d")
                 # Check if Open/Close is outside High/Low range
-                flag = "; " if (row['Open'] > row['High'] or row['Open'] < row['Low'] or 
-                              row['Close'] > row['High'] or row['Close'] < row['Low']) else ""
+                flag = (
+                    "; "
+                    if (
+                        row["Open"] > row["High"]
+                        or row["Open"] < row["Low"]
+                        or row["Close"] > row["High"]
+                        or row["Close"] < row["Low"]
+                    )
+                    else ""
+                )
                 print(
                     f"{flag}{date_fmt},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}"
                 )
