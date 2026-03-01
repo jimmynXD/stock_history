@@ -27,6 +27,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -c constraints-win7-py38.txt
 
+      - name: Show resolved dependency versions
+        run: |
+          python -V
+          pip freeze | findstr /i "yfinance multitasking"
+
       - name: Build with PyInstaller
         run: |
           pyinstaller --onefile --name stock_history_win7 stock_history.py
