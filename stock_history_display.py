@@ -210,9 +210,9 @@ def main():
             else:
                 print(f"{symbol} no recent data available")
             continue
-        
+
         stock_data[symbol] = (data, custom_header)
-    
+
     # Find majority date for latest data queries (no start_date)
     majority_date = None
     if not start_date and stock_data:
@@ -223,17 +223,17 @@ def main():
                 date_counts[date_str] = date_counts.get(date_str, 0) + 1
         if date_counts:
             majority_date = max(date_counts, key=date_counts.get)
-    
+
     # Second pass: display data with flags
     for symbol, (data, custom_header) in stock_data.items():
 
         if len(data) == 1:
             row = data.iloc[0]
             date_fmt = data.index[0].strftime("%Y-%m-%d")
-            
+
             # Check for date mismatch (only for latest data queries)
             date_flag = majority_date and date_fmt != majority_date
-            
+
             # Check if Open/Close is outside High/Low range
             ohlc_flag = (
                 row["Open"] > row["High"]
@@ -241,18 +241,22 @@ def main():
                 or row["Close"] > row["High"]
                 or row["Close"] < row["Low"]
             )
-            
+
             # Combine flags: date mismatch first, then OHLC anomaly
             flag = ""
             if date_flag and ohlc_flag:
-                flag = "*; "
+                flag = ";*! "
             elif date_flag:
-                flag = "* "
+                flag = ";* "
             elif ohlc_flag:
-                flag = "; "
-            
+                flag = ";! "
+
+            o = f"{row['Open']:.3f}".rstrip('0').rstrip('.')
+            h = f"{row['High']:.3f}".rstrip('0').rstrip('.')
+            l = f"{row['Low']:.3f}".rstrip('0').rstrip('.')
+            c = f"{row['Close']:.3f}".rstrip('0').rstrip('.')
             print(
-                f"{flag}{date_fmt},{symbol},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}"
+                f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{int(row['Volume'])}"
             )
         else:
             # Use custom header if available, otherwise use default
@@ -273,8 +277,12 @@ def main():
                     )
                     else ""
                 )
+                o = f"{row['Open']:.3f}".rstrip('0').rstrip('.')
+                h = f"{row['High']:.3f}".rstrip('0').rstrip('.')
+                l = f"{row['Low']:.3f}".rstrip('0').rstrip('.')
+                c = f"{row['Close']:.3f}".rstrip('0').rstrip('.')
                 print(
-                    f"{flag}{date_fmt},{row['Open']:.2f},{row['High']:.2f},{row['Low']:.2f},{row['Close']:.2f},{int(row['Volume'])}"
+                    f"{flag}{date_fmt},{o},{h},{l},{c},{int(row['Volume'])}"
                 )
             print()  # Empty line between symbols
 
