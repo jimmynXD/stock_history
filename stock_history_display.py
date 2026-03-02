@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import time
 from datetime import datetime, timedelta
 import yfinance as yf
 
@@ -184,6 +185,10 @@ def main():
             print("Error: Invalid date format. Use YYYY-MM-DD")
             sys.exit(1)
 
+    # Get local date and time when processing starts
+    process_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " " + time.strftime("%Z")
+    print(f"Processed: {process_time}\n")
+
     if start_date and end_date:
         date_str = f"{start_date}_to_{end_date}"
     elif start_date:
@@ -193,6 +198,7 @@ def main():
 
     successful = 0
     stock_data = {}  # Store fetched data for date analysis
+    no_data_stocks = {}  # Store stocks with no data available
 
     # First pass: fetch all data
     for symbol, custom_header in symbols.items():
@@ -205,24 +211,27 @@ def main():
         if isinstance(data, str) and data == "NO_DATA_FOR_DATE":
             if start_date and end_date:
                 print(f"{symbol} no data available for {start_date} to {end_date}")
+                no_data_stocks[symbol] = start_date  # Use start date for range
             elif start_date:
                 print(f"{symbol} no data available for {start_date}")
+                no_data_stocks[symbol] = start_date
             else:
                 print(f"{symbol} no recent data available")
+                no_data_stocks[symbol] = None  # Will use latest_date later
             continue
 
         stock_data[symbol] = (data, custom_header)
 
-    # Find majority date for latest data queries (no start_date)
-    majority_date = None
+    # Find latest date for latest data queries (no start_date)
+    latest_date = None
     if not start_date and stock_data:
-        date_counts = {}
         for symbol, (data, _) in stock_data.items():
             if len(data) == 1:
-                date_str = data.index[0].strftime("%Y-%m-%d")
-                date_counts[date_str] = date_counts.get(date_str, 0) + 1
-        if date_counts:
-            majority_date = max(date_counts, key=date_counts.get)
+                current_date = data.index[0]
+                if latest_date is None or current_date > latest_date:
+                    latest_date = current_date
+        if latest_date:
+            latest_date = latest_date.strftime("%Y-%m-%d")
 
     # Second pass: display data with flags
     for symbol, (data, custom_header) in stock_data.items():
@@ -232,7 +241,7 @@ def main():
             date_fmt = data.index[0].strftime("%Y-%m-%d")
 
             # Check for date mismatch (only for latest data queries)
-            date_flag = majority_date and date_fmt != majority_date
+            date_flag = latest_date and date_fmt != latest_date
 
             # Check if Open/Close is outside High/Low range
             ohlc_flag = (
@@ -288,7 +297,14 @@ def main():
 
         successful += 1
 
-    if successful > 0:
+    # Display stocks with no data available
+    for symbol, date_value in no_data_stocks.items():
+        if date_value is None:
+            # Use latest_date for stocks queried without specific date
+            date_value = latest_date if latest_date else datetime.now().strftime("%Y-%m-%d")
+        print(f"{date_value},{symbol},NO_DATA")
+
+    if successful > 0 or no_data_stocks:
         print(f"\nSuccessfully retrieved {successful} stock(s) for {date_str}")
     else:
         print("Error: No valid stock data retrieved")

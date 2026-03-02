@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import time
 from datetime import datetime, timedelta
 import yfinance as yf
 
@@ -220,6 +221,7 @@ def main():
 
     successful = 0
     stock_data = {}  # Store fetched data for date analysis
+    no_data_stocks = {}  # Store stocks with no data available
 
     # First pass: fetch all data
     for symbol, custom_header in symbols.items():
@@ -232,33 +234,36 @@ def main():
         if isinstance(data, str) and data == "NO_DATA_FOR_DATE":
             if start_date and end_date:
                 print(f"{symbol} no data available for {start_date} to {end_date}")
+                no_data_stocks[symbol] = start_date  # Use start date for range
             elif start_date:
                 print(f"{symbol} no data available for {start_date}")
+                no_data_stocks[symbol] = start_date
             else:
                 print(f"{symbol} no recent data available")
+                no_data_stocks[symbol] = None  # Will use latest_date later
             continue
 
         stock_data[symbol] = (data, custom_header)
 
-    # Find majority date for latest data queries (no start_date)
-    majority_date = None
+    # Find latest date for latest data queries (no start_date)
+    latest_date = None
     if not start_date and stock_data:
-        date_counts = {}
         for symbol, (data, _) in stock_data.items():
             if len(data) == 1:
-                date_str = data.index[0].strftime("%Y-%m-%d")
-                date_counts[date_str] = date_counts.get(date_str, 0) + 1
-        if date_counts:
-            majority_date = max(date_counts, key=date_counts.get)
+                current_date = data.index[0]
+                if latest_date is None or current_date > latest_date:
+                    latest_date = current_date
+        if latest_date:
+            latest_date = latest_date.strftime("%Y-%m-%d")
 
     # Determine date string for filename
     if start_date and end_date:
         date_str = f"{start_date}_to_{end_date}"
     elif start_date:
         date_str = start_date
-    elif majority_date:
-        # Use majority date without hyphens for latest data queries
-        date_str = majority_date.replace("-", "")
+    elif latest_date:
+        # Use latest date without hyphens for latest data queries
+        date_str = latest_date.replace("-", "")
     else:
         date_str = datetime.now().strftime("%Y-%m-%d")
 
@@ -277,8 +282,15 @@ def main():
         # No output path, use current directory
         filename = get_filename(date_str, ".")
 
+    # Get local date and time when processing starts
+    process_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " " + time.strftime("%Z")
+
     # Second pass: write data with flags
     with open(filename, "w", encoding="big5") as f:
+        # Write process time as first line
+        f.write(f"Processed: {process_time}\n")
+        
+        # Write stocks with data
         for symbol, (data, custom_header) in stock_data.items():
 
             if len(data) == 1:
@@ -286,7 +298,7 @@ def main():
                 date_fmt = data.index[0].strftime("%Y-%m-%d")
 
                 # Check for date mismatch (only for latest data queries)
-                date_flag = majority_date and date_fmt != majority_date
+                date_flag = latest_date and date_fmt != latest_date
 
                 # Check if Open/Close is outside High/Low range
                 ohlc_flag = (
@@ -341,7 +353,14 @@ def main():
 
             successful += 1
 
-    if successful > 0:
+        # Write stocks with no data available
+        for symbol, date_value in no_data_stocks.items():
+            if date_value is None:
+                # Use latest_date for stocks queried without specific date
+                date_value = latest_date if latest_date else datetime.now().strftime("%Y-%m-%d")
+            f.write(f"{date_value},{symbol},NO_DATA\n")
+
+    if successful > 0 or no_data_stocks:
         abs_path = os.path.abspath(filename)
         print(f"Successfully saved {successful} stock for {date_str} at {abs_path}")
     else:
