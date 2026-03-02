@@ -17,6 +17,7 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.8.10"
+          architecture: x86
           cache: "pip"
           cache-dependency-path: |
             requirements.txt
@@ -30,7 +31,9 @@ jobs:
       - name: Show resolved dependency versions
         run: |
           python -V
-          pip freeze | findstr /i "yfinance multitasking"
+          pyinstaller --version
+          pip freeze | findstr /i "pyinstaller yfinance multitasking"
+          python -c "import yfinance as yf; import socket; print('imports_ok', yf.__version__)"
 
       - name: Build with PyInstaller
         run: |
