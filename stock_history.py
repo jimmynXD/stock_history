@@ -49,20 +49,29 @@ def read_symbols(input_arg):
                                         header = line[
                                             second_quote_start + 1 : second_quote_end
                                         ]
-                                        symbols_dict[symbol] = header
+                                        # Look for third parameter (volume multiplier)
+                                        third_comma_pos = line.find(",", second_quote_end)
+                                        multiplier = 1.0
+                                        if third_comma_pos > 0:
+                                            third_param = line[third_comma_pos + 1:].strip().strip('"')
+                                            try:
+                                                multiplier = float(third_param)
+                                            except ValueError:
+                                                multiplier = 1.0
+                                        symbols_dict[symbol] = (header, multiplier)
                                     else:
-                                        symbols_dict[symbol] = None
+                                        symbols_dict[symbol] = (None, 1.0)
                                 else:
-                                    symbols_dict[symbol] = None
+                                    symbols_dict[symbol] = (None, 1.0)
                             else:
                                 # Single quoted symbol
-                                symbols_dict[symbol] = None
+                                symbols_dict[symbol] = (None, 1.0)
                         else:
                             # Malformed line, skip
                             continue
                     else:
                         # Plain text format (symbols.txt)
-                        symbols_dict[line] = None
+                        symbols_dict[line] = (None, 1.0)
         except UnicodeDecodeError:
             # Fallback to Big5 encoding for Traditional Chinese Windows files
             with open(input_arg, "r", encoding="big5") as f:
@@ -85,20 +94,29 @@ def read_symbols(input_arg):
                                         header = line[
                                             second_quote_start + 1 : second_quote_end
                                         ]
-                                        symbols_dict[symbol] = header
+                                        # Look for third parameter (volume multiplier)
+                                        third_comma_pos = line.find(",", second_quote_end)
+                                        multiplier = 1.0
+                                        if third_comma_pos > 0:
+                                            third_param = line[third_comma_pos + 1:].strip().strip('"')
+                                            try:
+                                                multiplier = float(third_param)
+                                            except ValueError:
+                                                multiplier = 1.0
+                                        symbols_dict[symbol] = (header, multiplier)
                                     else:
-                                        symbols_dict[symbol] = None
+                                        symbols_dict[symbol] = (None, 1.0)
                                 else:
-                                    symbols_dict[symbol] = None
+                                    symbols_dict[symbol] = (None, 1.0)
                             else:
-                                symbols_dict[symbol] = None
+                                symbols_dict[symbol] = (None, 1.0)
                         else:
                             continue
                     else:
-                        symbols_dict[line] = None
+                        symbols_dict[line] = (None, 1.0)
         return symbols_dict
     # Single symbol from command line
-    return {input_arg: None}
+    return {input_arg: (None, 1.0)}
 
 
 def get_filename(date_str, output_dir="."):
@@ -224,7 +242,7 @@ def main():
     no_data_stocks = {}  # Store stocks with no data available
 
     # First pass: fetch all data
-    for symbol, custom_header in symbols.items():
+    for symbol, (custom_header, multiplier) in symbols.items():
         data = fetch_data(symbol, start_date, end_date)
 
         if data is None:
@@ -243,12 +261,12 @@ def main():
                 no_data_stocks[symbol] = None  # Will use latest_date later
             continue
 
-        stock_data[symbol] = (data, custom_header)
+        stock_data[symbol] = (data, custom_header, multiplier)
 
     # Find latest date for latest data queries (no start_date)
     latest_date = None
     if not start_date and stock_data:
-        for symbol, (data, _) in stock_data.items():
+        for symbol, (data, _, _) in stock_data.items():
             if len(data) == 1:
                 current_date = data.index[0]
                 if latest_date is None or current_date > latest_date:
@@ -291,7 +309,7 @@ def main():
         f.write(f"Processed: {process_time}\n")
         
         # Write stocks with data
-        for symbol, (data, custom_header) in stock_data.items():
+        for symbol, (data, custom_header, multiplier) in stock_data.items():
 
             if len(data) == 1:
                 row = data.iloc[0]
@@ -321,8 +339,9 @@ def main():
                 h = f"{row['High']:.3f}".rstrip('0').rstrip('.')
                 l = f"{row['Low']:.3f}".rstrip('0').rstrip('.')
                 c = f"{row['Close']:.3f}".rstrip('0').rstrip('.')
+                volume = int(row['Volume'] * multiplier)
                 f.write(
-                    f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{int(row['Volume'])}\n"
+                    f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{volume}\n"
                 )
             else:
                 # Use custom header if available, otherwise use default
@@ -347,8 +366,9 @@ def main():
                     h = f"{row['High']:.3f}".rstrip('0').rstrip('.')
                     l = f"{row['Low']:.3f}".rstrip('0').rstrip('.')
                     c = f"{row['Close']:.3f}".rstrip('0').rstrip('.')
+                    volume = int(row['Volume'] * multiplier)
                     f.write(
-                        f"{flag}{date_fmt},{o},{h},{l},{c},{int(row['Volume'])}\n"
+                        f"{flag}{date_fmt},{o},{h},{l},{c},{volume}\n"
                     )
 
             successful += 1
