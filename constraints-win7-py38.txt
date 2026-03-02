@@ -1,2 +1,1 @@
 multitasking==0.0.11
-pyinstaller==5.13.2
