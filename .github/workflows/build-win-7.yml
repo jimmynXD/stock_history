@@ -39,6 +39,8 @@ jobs:
         run: |
           pyinstaller --onefile --name stock_history_win7 stock_history.py
           pyinstaller --onefile --name stock_history_display_win7 stock_history_display.py
+          pyinstaller --onefile --name stock_history_performance_win7 stock_history_performance.py
+          pyinstaller --onefile --name stock_history_display_performance_win7 stock_history_display_performance.py
 
       - name: Commit executables to repo
         uses: stefanzweifel/git-auto-commit-action@v7.1.0

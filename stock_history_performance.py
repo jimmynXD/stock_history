@@ -131,6 +131,34 @@ def read_symbols(input_arg):
     return {input_arg: (None, 1.0)}
 
 
+def get_filename(date_str, output_dir="."):
+    """Generate unique filename with incremental suffix for duplicates."""
+    # Create output directory if it doesn't exist
+    if output_dir != ".":
+        os.makedirs(output_dir, exist_ok=True)
+
+    # Check if date_str is in YYYYMMDD format (8 digits, no hyphens)
+    if len(date_str) == 8 and date_str.isdigit():
+        base = os.path.join(output_dir, f"{date_str}.txt")
+        if not os.path.exists(base):
+            return base
+        i = 1
+        while os.path.exists(os.path.join(output_dir, f"{date_str}_{i}.txt")):
+            i += 1
+        return os.path.join(output_dir, f"{date_str}_{i}.txt")
+    else:
+        # Original format
+        base = os.path.join(output_dir, f"{date_str}.txt")
+        if not os.path.exists(base):
+            return base
+        i = 1
+        while os.path.exists(
+            os.path.join(output_dir, f"{date_str}_{i}.txt")
+        ):
+            i += 1
+        return os.path.join(output_dir, f"{date_str}_{i}.txt")
+
+
 def fetch_data(symbol, start_date, end_date):
     """Fetch OHLC data for a stock symbol using yfinance."""
     try:
@@ -171,9 +199,14 @@ def healthcheck():
 
 
 def main():
-    """Main function to download and print stock OHLC history data."""
+    """Main function to download and save stock OHLC history data."""
     if len(sys.argv) < 2:
-        print("Usage: stock_history_display.py <symbol|file> [start_date] [end_date]")
+        print(
+            "Usage: stock_history.py <symbol|file> [start_date] [end_date] [output_path]"
+        )
+        print("  output_path can be:")
+        print("    - Directory path (e.g., ./data)")
+        print("    - Full file path (e.g., ./data/my_stocks.txt)")
         sys.exit(1)
 
     # Healthcheck
@@ -187,10 +220,11 @@ def main():
         print("Error: No stock symbols provided")
         sys.exit(1)
 
-    print(f"Processing {len(symbols)} stock symbol(s)\n")
+    print(f"Processing {len(symbols)} stock symbol(s)")
 
     start_date = sys.argv[2] if len(sys.argv) > 2 else None
     end_date = sys.argv[3] if len(sys.argv) > 3 else None
+    output_path = sys.argv[4] if len(sys.argv) > 4 else None
 
     # Validate date range before making API calls
     if start_date and end_date:
@@ -216,36 +250,84 @@ def main():
             sys.exit(1)
 
     # Get local date and time when processing starts
+    process_start_time = time.time()
     process_time = (
         datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " " + time.strftime("%Z")
     )
-    print(f"; Processed: {process_time}\n")
 
-    if start_date and end_date:
-        date_str = f"{start_date}_to_{end_date}"
-    elif start_date:
-        date_str = start_date
-    else:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+    stock_data = {}
+    no_data_stocks = {}
+    invalid_stocks = {}
 
-    successful = 0
-    stock_data = {}  # Store fetched data for date analysis
-    no_data_stocks = {}  # Store stocks with no data available
-    invalid_stocks = {}  # Store invalid stock symbols
+    # Fetch all data using yf.download with threading
+    symbol_list = list(symbols.keys())
+    
+    with SuppressStderr():
+        if start_date and end_date:
+            # Add one day to end_date since yfinance end parameter is exclusive
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            end_dt_inclusive = end_dt + timedelta(days=1)
+            end_date_str = end_dt_inclusive.strftime("%Y-%m-%d")
+            all_data = yf.download(symbol_list, start=start_date, end=end_date_str, threads=True, progress=False)
+        elif start_date:
+            # For single date, use start + end (start+1day) since start+period doesn't work well with many symbols
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = start_dt + timedelta(days=1)
+            end_date_str = end_dt.strftime("%Y-%m-%d")
+            all_data = yf.download(symbol_list, start=start_date, end=end_date_str, threads=True, progress=False)
+        else:
+            all_data = yf.download(symbol_list, period="1d", threads=True, progress=False)
 
-    # First pass: fetch all data
+    # Process results
+    failed_symbols = []
     for symbol, (custom_header, multiplier) in symbols.items():
-        data = fetch_data(symbol, start_date, end_date)
-
-        if data is None:
+        try:
+            if len(symbol_list) == 1:
+                # Single symbol still has MultiIndex columns with yf.download
+                data = all_data.xs(symbol, level=1, axis=1) if hasattr(all_data.columns, 'levels') else all_data[['Open', 'High', 'Low', 'Close', 'Volume']]
+            else:
+                data = all_data.xs(symbol, level=1, axis=1) if len(all_data.columns.levels) > 1 else all_data[symbol]
+            
+            # Drop rows with all NaN values
+            data = data.dropna(how='all')
+            
+            if data.empty or data.isna().all().all():
+                # Mark for individual retry
+                failed_symbols.append((symbol, custom_header, multiplier))
+            else:
+                stock_data[symbol] = (data, custom_header, multiplier)
+        except (KeyError, AttributeError):
             invalid_stocks[symbol] = custom_header
-            continue
 
-        if isinstance(data, str) and data == "NO_DATA_FOR_DATE":
-            no_data_stocks[symbol] = start_date if start_date else None
-            continue
+    # Retry failed symbols individually
+    if failed_symbols:
+        for symbol, custom_header, multiplier in failed_symbols:
+            with SuppressStderr():
+                try:
+                    ticker = yf.Ticker(symbol)
+                    if start_date and end_date:
+                        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                        end_dt_inclusive = end_dt + timedelta(days=1)
+                        end_date_str = end_dt_inclusive.strftime("%Y-%m-%d")
+                        data = ticker.history(start=start_date, end=end_date_str)
+                    elif start_date:
+                        data = ticker.history(start=start_date, period="1d")
+                    else:
+                        data = ticker.history(period="1d")
+                    
+                    if data.empty:
+                        no_data_stocks[symbol] = start_date if start_date else None
+                    else:
+                        # Select only OHLCV columns
+                        data = data[['Open', 'High', 'Low', 'Close', 'Volume']]
+                        stock_data[symbol] = (data, custom_header, multiplier)
+                except Exception:
+                    invalid_stocks[symbol] = custom_header
 
-        stock_data[symbol] = (data, custom_header, multiplier)
+    # Calculate total elapsed time
+    total_elapsed = time.time() - process_start_time
+    minutes = int(total_elapsed // 60)
+    seconds = total_elapsed % 60
 
     # Find latest date for latest data queries (no start_date)
     latest_date = None
@@ -258,87 +340,136 @@ def main():
         if latest_date:
             latest_date = latest_date.strftime("%Y-%m-%d")
 
-    # Second pass: display data with flags
-    for symbol, (data, custom_header, multiplier) in stock_data.items():
+    # Determine date string for filename
+    if start_date and end_date:
+        date_str = f"{start_date.replace('-', '')}-{end_date.replace('-', '')}"
+        query_desc = f"{sys.argv[1]} {start_date} {end_date}"
+    elif start_date:
+        date_str = start_date.replace("-", "")
+        query_desc = f"{sys.argv[1]} {start_date}"
+    elif latest_date:
+        # Use latest date without hyphens for latest data queries
+        date_str = latest_date.replace("-", "")
+        query_desc = f"{sys.argv[1]} latest_data"
+    else:
+        date_str = datetime.now().strftime("%Y%m%d")
+        query_desc = f"{sys.argv[1]} latest_data"
 
-        if len(data) == 1:
-            row = data.iloc[0]
-            date_fmt = data.index[0].strftime("%Y-%m-%d")
-
-            # Check for date mismatch (only for latest data queries)
-            date_flag = latest_date and date_fmt != latest_date
-
-            # Check if Open/Close is outside High/Low range
-            ohlc_flag = (
-                row["Open"] > row["High"]
-                or row["Open"] < row["Low"]
-                or row["Close"] > row["High"]
-                or row["Close"] < row["Low"]
-            )
-
-            # Combine flags: date mismatch first, then OHLC anomaly
-            flag = ""
-            if date_flag and ohlc_flag:
-                flag = ";*! "
-            elif date_flag:
-                flag = ";* "
-            elif ohlc_flag:
-                flag = ";! "
-
-            o = f"{row['Open']:.3f}".rstrip("0").rstrip(".")
-            h = f"{row['High']:.3f}".rstrip("0").rstrip(".")
-            l = f"{row['Low']:.3f}".rstrip("0").rstrip(".")
-            c = f"{row['Close']:.3f}".rstrip("0").rstrip(".")
-            volume = int(row["Volume"] * multiplier)
-            print(f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{volume}")
+    # Determine filename based on output_path
+    if output_path:
+        if output_path.lower().endswith(".txt"):
+            # Full file path provided
+            filename = output_path
+            output_dir = os.path.dirname(output_path) or "."
+            if output_dir != ".":
+                os.makedirs(output_dir, exist_ok=True)
         else:
-            # Use custom header if available
-            if custom_header:
-                print(custom_header)
-            for date, row in data.iterrows():
-                date_fmt = date.strftime("%Y-%m-%d")
+            # Directory path provided
+            filename = get_filename(date_str, output_path)
+    else:
+        # No output path, use current directory
+        filename = get_filename(date_str, ".")
+
+    # Get local date and time when processing starts
+    process_time = (
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " " + time.strftime("%Z")
+    )
+
+    # Second pass: write data with flags in original order
+    successful = 0
+    with open(filename, "w", encoding="big5", errors="replace") as f:
+        # Write process time and timing info as first lines
+        f.write(f"; Processed: {process_time}\n")
+        f.write(f"; Total time: {minutes}m{seconds:.3f}s\n")
+        f.write(f"; Queried: {query_desc}\n")
+
+        # Write stocks with data in original symbols order
+        for symbol, (custom_header, multiplier) in symbols.items():
+            if symbol not in stock_data:
+                continue
+            
+            data = stock_data[symbol][0]
+
+            if len(data) == 1:
+                row = data.iloc[0]
+                date_fmt = data.index[0].strftime("%Y-%m-%d")
+
+                # Check for date mismatch (only for latest data queries)
+                date_flag = latest_date and date_fmt != latest_date
+
                 # Check if Open/Close is outside High/Low range
-                flag = (
-                    "; "
-                    if (
-                        row["Open"] > row["High"]
-                        or row["Open"] < row["Low"]
-                        or row["Close"] > row["High"]
-                        or row["Close"] < row["Low"]
-                    )
-                    else ""
+                ohlc_flag = (
+                    row["Open"] > row["High"]
+                    or row["Open"] < row["Low"]
+                    or row["Close"] > row["High"]
+                    or row["Close"] < row["Low"]
                 )
+
+                # Combine flags: date mismatch first, then OHLC anomaly
+                flag = ""
+                if date_flag and ohlc_flag:
+                    flag = ";*! "
+                elif date_flag:
+                    flag = ";* "
+                elif ohlc_flag:
+                    flag = ";! "
+
                 o = f"{row['Open']:.3f}".rstrip("0").rstrip(".")
                 h = f"{row['High']:.3f}".rstrip("0").rstrip(".")
                 l = f"{row['Low']:.3f}".rstrip("0").rstrip(".")
                 c = f"{row['Close']:.3f}".rstrip("0").rstrip(".")
                 volume = int(row["Volume"] * multiplier)
-                # Include symbol in output when no custom header
+                f.write(f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{volume}\n")
+            else:
+                # Use custom header if available
                 if custom_header:
-                    print(f"{flag}{date_fmt},{o},{h},{l},{c},{volume}")
-                else:
-                    print(f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{volume}")
+                    f.write(f"{custom_header}\n")
+                for date, row in data.iterrows():
+                    date_fmt = date.strftime("%Y-%m-%d")
+                    # Check if Open/Close is outside High/Low range
+                    flag = (
+                        "; "
+                        if (
+                            row["Open"] > row["High"]
+                            or row["Open"] < row["Low"]
+                            or row["Close"] > row["High"]
+                            or row["Close"] < row["Low"]
+                        )
+                        else ""
+                    )
+                    o = f"{row['Open']:.3f}".rstrip("0").rstrip(".")
+                    h = f"{row['High']:.3f}".rstrip("0").rstrip(".")
+                    l = f"{row['Low']:.3f}".rstrip("0").rstrip(".")
+                    c = f"{row['Close']:.3f}".rstrip("0").rstrip(".")
+                    volume = int(row["Volume"] * multiplier)
+                    # Include symbol in output when no custom header
+                    if custom_header:
+                        f.write(f"{flag}{date_fmt},{o},{h},{l},{c},{volume}\n")
+                    else:
+                        f.write(f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{volume}\n")
 
-        successful += 1
+            successful += 1
 
-    # Display stocks with no data available
-    for symbol in no_data_stocks.keys():
-        custom_header, _ = symbols.get(symbol, (None, 1.0))
-        if custom_header:
-            print(f'; NO_DATA "{symbol}","{custom_header}"')
-        else:
-            print(f'; NO_DATA "{symbol}"')
+        # Write stocks with no data available
+        for symbol in no_data_stocks.keys():
+            custom_header, _ = symbols.get(symbol, (None, 1.0))
+            if custom_header:
+                f.write(f'; NO_DATA "{symbol}","{custom_header}"\n')
+            else:
+                f.write(f'; NO_DATA "{symbol}"\n')
 
-    # Display invalid stock symbols
-    for symbol, custom_header in invalid_stocks.items():
-        if custom_header:
-            print(f'; INVALID_SYMBOL "{symbol}","{custom_header}"')
-        else:
-            print(f'; INVALID_SYMBOL "{symbol}"')
+        # Write invalid stock symbols
+        for symbol, custom_header in invalid_stocks.items():
+            if custom_header:
+                f.write(f'; INVALID_SYMBOL "{symbol}","{custom_header}"\n')
+            else:
+                f.write(f'; INVALID_SYMBOL "{symbol}"\n')
 
     if successful > 0 or no_data_stocks or invalid_stocks:
-        print(f"\nSuccessfully retrieved {successful} stock(s) for {date_str}")
+        abs_path = os.path.abspath(filename)
+        print(f"Successfully saved {successful} stock for {date_str} at {abs_path}")
     else:
+        os.remove(filename)
         print("Error: No valid stock data retrieved")
         sys.exit(1)
 
