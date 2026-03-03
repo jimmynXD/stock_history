@@ -50,10 +50,16 @@ def read_symbols(input_arg):
                                             second_quote_start + 1 : second_quote_end
                                         ]
                                         # Look for third parameter (volume multiplier)
-                                        third_comma_pos = line.find(",", second_quote_end)
+                                        third_comma_pos = line.find(
+                                            ",", second_quote_end
+                                        )
                                         multiplier = 1.0
                                         if third_comma_pos > 0:
-                                            third_param = line[third_comma_pos + 1:].strip().strip('"')
+                                            third_param = (
+                                                line[third_comma_pos + 1 :]
+                                                .strip()
+                                                .strip('"')
+                                            )
                                             try:
                                                 multiplier = float(third_param)
                                             except ValueError:
@@ -95,10 +101,16 @@ def read_symbols(input_arg):
                                             second_quote_start + 1 : second_quote_end
                                         ]
                                         # Look for third parameter (volume multiplier)
-                                        third_comma_pos = line.find(",", second_quote_end)
+                                        third_comma_pos = line.find(
+                                            ",", second_quote_end
+                                        )
                                         multiplier = 1.0
                                         if third_comma_pos > 0:
-                                            third_param = line[third_comma_pos + 1:].strip().strip('"')
+                                            third_param = (
+                                                line[third_comma_pos + 1 :]
+                                                .strip()
+                                                .strip('"')
+                                            )
                                             try:
                                                 multiplier = float(third_param)
                                             except ValueError:
@@ -135,16 +147,16 @@ def get_filename(date_str, output_dir="."):
             i += 1
         return os.path.join(output_dir, f"{date_str}_{i}.txt")
     else:
-        # Original format with -stock_history suffix
-        base = os.path.join(output_dir, f"{date_str}-stock_history.txt")
+        # Original format
+        base = os.path.join(output_dir, f"{date_str}.txt")
         if not os.path.exists(base):
             return base
         i = 1
         while os.path.exists(
-            os.path.join(output_dir, f"{date_str}-stock_history_{i}.txt")
+            os.path.join(output_dir, f"{date_str}_{i}.txt")
         ):
             i += 1
-        return os.path.join(output_dir, f"{date_str}-stock_history_{i}.txt")
+        return os.path.join(output_dir, f"{date_str}_{i}.txt")
 
 
 def fetch_data(symbol, start_date, end_date):
@@ -240,25 +252,18 @@ def main():
     successful = 0
     stock_data = {}  # Store fetched data for date analysis
     no_data_stocks = {}  # Store stocks with no data available
+    invalid_stocks = {}  # Store invalid stock symbols
 
     # First pass: fetch all data
     for symbol, (custom_header, multiplier) in symbols.items():
         data = fetch_data(symbol, start_date, end_date)
 
         if data is None:
-            print(f"{symbol} not found")
+            invalid_stocks[symbol] = custom_header
             continue
 
         if isinstance(data, str) and data == "NO_DATA_FOR_DATE":
-            if start_date and end_date:
-                print(f"{symbol} no data available for {start_date} to {end_date}")
-                no_data_stocks[symbol] = start_date  # Use start date for range
-            elif start_date:
-                print(f"{symbol} no data available for {start_date}")
-                no_data_stocks[symbol] = start_date
-            else:
-                print(f"{symbol} no recent data available")
-                no_data_stocks[symbol] = None  # Will use latest_date later
+            no_data_stocks[symbol] = start_date if start_date else None
             continue
 
         stock_data[symbol] = (data, custom_header, multiplier)
@@ -276,14 +281,14 @@ def main():
 
     # Determine date string for filename
     if start_date and end_date:
-        date_str = f"{start_date}_to_{end_date}"
+        date_str = f"{start_date.replace('-', '')}-{end_date.replace('-', '')}"
     elif start_date:
-        date_str = start_date
+        date_str = start_date.replace("-", "")
     elif latest_date:
         # Use latest date without hyphens for latest data queries
         date_str = latest_date.replace("-", "")
     else:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.now().strftime("%Y%m%d")
 
     # Determine filename based on output_path
     if output_path:
@@ -301,13 +306,15 @@ def main():
         filename = get_filename(date_str, ".")
 
     # Get local date and time when processing starts
-    process_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " " + time.strftime("%Z")
+    process_time = (
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " " + time.strftime("%Z")
+    )
 
     # Second pass: write data with flags
-    with open(filename, "w", encoding="big5") as f:
+    with open(filename, "w", encoding="big5", errors="replace") as f:
         # Write process time as first line
-        f.write(f"Processed: {process_time}\n")
-        
+        f.write(f"; Processed: {process_time}\n")
+
         # Write stocks with data
         for symbol, (data, custom_header, multiplier) in stock_data.items():
 
@@ -335,20 +342,16 @@ def main():
                 elif ohlc_flag:
                     flag = ";! "
 
-                o = f"{row['Open']:.3f}".rstrip('0').rstrip('.')
-                h = f"{row['High']:.3f}".rstrip('0').rstrip('.')
-                l = f"{row['Low']:.3f}".rstrip('0').rstrip('.')
-                c = f"{row['Close']:.3f}".rstrip('0').rstrip('.')
-                volume = int(row['Volume'] * multiplier)
-                f.write(
-                    f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{volume}\n"
-                )
+                o = f"{row['Open']:.3f}".rstrip("0").rstrip(".")
+                h = f"{row['High']:.3f}".rstrip("0").rstrip(".")
+                l = f"{row['Low']:.3f}".rstrip("0").rstrip(".")
+                c = f"{row['Close']:.3f}".rstrip("0").rstrip(".")
+                volume = int(row["Volume"] * multiplier)
+                f.write(f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{volume}\n")
             else:
-                # Use custom header if available, otherwise use default
+                # Use custom header if available
                 if custom_header:
                     f.write(f"{custom_header}\n")
-                else:
-                    f.write(f"DATE OHLCV {symbol}\n")
                 for date, row in data.iterrows():
                     date_fmt = date.strftime("%Y-%m-%d")
                     # Check if Open/Close is outside High/Low range
@@ -362,25 +365,35 @@ def main():
                         )
                         else ""
                     )
-                    o = f"{row['Open']:.3f}".rstrip('0').rstrip('.')
-                    h = f"{row['High']:.3f}".rstrip('0').rstrip('.')
-                    l = f"{row['Low']:.3f}".rstrip('0').rstrip('.')
-                    c = f"{row['Close']:.3f}".rstrip('0').rstrip('.')
-                    volume = int(row['Volume'] * multiplier)
-                    f.write(
-                        f"{flag}{date_fmt},{o},{h},{l},{c},{volume}\n"
-                    )
+                    o = f"{row['Open']:.3f}".rstrip("0").rstrip(".")
+                    h = f"{row['High']:.3f}".rstrip("0").rstrip(".")
+                    l = f"{row['Low']:.3f}".rstrip("0").rstrip(".")
+                    c = f"{row['Close']:.3f}".rstrip("0").rstrip(".")
+                    volume = int(row["Volume"] * multiplier)
+                    # Include symbol in output when no custom header
+                    if custom_header:
+                        f.write(f"{flag}{date_fmt},{o},{h},{l},{c},{volume}\n")
+                    else:
+                        f.write(f"{flag}{date_fmt},{symbol},{o},{h},{l},{c},{volume}\n")
 
             successful += 1
 
         # Write stocks with no data available
-        for symbol, date_value in no_data_stocks.items():
-            if date_value is None:
-                # Use latest_date for stocks queried without specific date
-                date_value = latest_date if latest_date else datetime.now().strftime("%Y-%m-%d")
-            f.write(f"{date_value},{symbol},NO_DATA\n")
+        for symbol in no_data_stocks.keys():
+            custom_header, _ = symbols.get(symbol, (None, 1.0))
+            if custom_header:
+                f.write(f'; NO_DATA "{symbol}","{custom_header}"\n')
+            else:
+                f.write(f'; NO_DATA "{symbol}"\n')
 
-    if successful > 0 or no_data_stocks:
+        # Write invalid stock symbols
+        for symbol, custom_header in invalid_stocks.items():
+            if custom_header:
+                f.write(f'; INVALID_SYMBOL "{symbol}","{custom_header}"\n')
+            else:
+                f.write(f'; INVALID_SYMBOL "{symbol}"\n')
+
+    if successful > 0 or no_data_stocks or invalid_stocks:
         abs_path = os.path.abspath(filename)
         print(f"Successfully saved {successful} stock for {date_str} at {abs_path}")
     else:
