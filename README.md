@@ -4,7 +4,7 @@ Download historical OHLCV (Open, High, Low, Close, Volume) data for stocks using
 
 ## Requirements
 
-- Python 3.x
+- Python 3.8 (this version will work for windows 7)
 - yfinance library
 
 ## Installation
@@ -53,6 +53,12 @@ python3 stock_history_display.py AAPL 2024-01-01
 ### Windows
 
 ```cmd
+# Build self executable compilers
+pyinstaller --onefile --name stock_history_win7 stock_history.py
+pyinstaller --onefile --name stock_history_display_win7 stock_history_display.py
+pyinstaller --onefile --name stock_history_performance stock_history_performance.py
+pyinstaller --onefile --name stock_history_display_performance stock_history_display_performance.py
+
 stock_history.exe AAPL
 ```
 
@@ -75,6 +81,14 @@ Advanced format with custom headers:
 ```
 "AAPL","CUSTOM_HEADER"
 "MSFT","CUSTOM_HEADER"
+```
+
+**Comments:** Lines starting with `;` are treated as comments and skipped
+
+```
+AAPL
+; This is a comment
+MSFT
 ```
 
 - Format: `"SYMBOL","CUSTOM_HEADER"[,"VOLUME_MULTIPLIER"]` (flexible whitespace before comma)

@@ -29,7 +29,7 @@ def read_symbols(input_arg):
             with open(input_arg, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if not line:
+                    if not line or line.startswith(";"):
                         continue
                     # Check if line contains quoted values (StockList.txt format)
                     if line.startswith('"'):
@@ -83,7 +83,7 @@ def read_symbols(input_arg):
             with open(input_arg, "r", encoding="big5") as f:
                 for line in f:
                     line = line.strip()
-                    if not line:
+                    if not line or line.startswith(";"):
                         continue
                     if line.startswith('"'):
                         first_quote_end = line.find('"', 1)
