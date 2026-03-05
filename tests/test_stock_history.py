@@ -92,6 +92,38 @@ class TestReadSymbols(unittest.TestCase):
         finally:
             os.unlink(f.name)
 
+    def test_comment_lines(self):
+        """Test file with comment lines starting with semicolon"""
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
+            f.write("AAPL\n")
+            f.write("; This is a comment\n")
+            f.write("MSFT\n")
+            f.write("; Another comment\n")
+            f.write("GOOG\n")
+            f.name
+
+        try:
+            result = read_symbols(f.name)
+            self.assertEqual(result, {"AAPL": (None, 1.0), "MSFT": (None, 1.0), "GOOG": (None, 1.0)})
+        finally:
+            os.unlink(f.name)
+
+    def test_comment_lines_with_advanced_format(self):
+        """Test comment lines with advanced format"""
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
+            f.write('"AAPL","Apple Custom Header"\n')
+            f.write("; This is a comment\n")
+            f.write('"MSFT","Microsoft Custom Header"\n')
+            f.name
+
+        try:
+            result = read_symbols(f.name)
+            self.assertEqual(result["AAPL"], ("Apple Custom Header", 1.0))
+            self.assertEqual(result["MSFT"], ("Microsoft Custom Header", 1.0))
+            self.assertEqual(len(result), 2)
+        finally:
+            os.unlink(f.name)
+
     def test_volume_multiplier(self):
         """Test volume multiplier parsing"""
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
